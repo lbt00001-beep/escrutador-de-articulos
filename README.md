@@ -1,8 +1,8 @@
-# Escrutador de Artículos · v1.3.0
+# Escrutador de Artículos · v1.4.0
 
 Analiza un artículo periodístico (URL, PDF o texto pegado) y entrega un informe de calidad con nota de 0 a 10: datos en los que se apoya el autor, contraste de esos datos con fuentes externas, ideas principales y secundarias calificadas, falacias, omisiones y una valoración final razonada.
 
-*By Luis Benedicto Tuzón with Claude Opus 5.5 · 2026 · v1.3.0*
+*By Luis Benedicto Tuzón with Claude Opus 5.5 · 2026 · v1.4.0*
 
 ## Versión web
 

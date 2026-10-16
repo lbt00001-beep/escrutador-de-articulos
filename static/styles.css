@@ -317,3 +317,23 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   .original { font-size: 12.5px; }
   #s-texto { break-inside: auto; }
 }
+
+/* Alta en OpenRouter */
+details.signup { margin-top: 14px; background: var(--navy-soft); border-radius: 10px; padding: 10px 14px; }
+details.signup summary { cursor: pointer; font-weight: 600; color: var(--navy); font-size: 14px; }
+details.signup ol { margin: 10px 0 6px; padding-left: 20px; font-size: 14px; }
+details.signup li { margin: 6px 0; }
+details.signup p { margin: 6px 0 2px; }
+
+/* Selector de modelos por coste/beneficio */
+.model-list { display: grid; gap: 8px; }
+.model-card { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; transition: border-color .15s, background .15s; }
+.model-card:hover { border-color: #b9c3d8; }
+.model-card.selected { border-color: var(--navy); background: var(--navy-soft); }
+.model-card input { margin-top: 4px; accent-color: var(--navy); }
+.mc-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mc-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mc-top .chip { font-size: 10.5px; padding: 2px 7px; }
+.mc-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: var(--ink-2); }
+.stars { color: var(--accent); letter-spacing: 1px; }
+.mc-note { font-size: 13px; color: var(--muted); }

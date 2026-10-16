@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 APP_YEAR = 2026
 APP_CREDIT = "By Luis Benedicto Tuzón with Claude Opus 5.5"
 
@@ -35,21 +35,32 @@ POSSIBLE_KEY_PATHS = [p for p in [
 ] if p is not None]
 
 # Precios por 1M de tokens (entrada / salida) según OpenRouter, octubre 2026.
+# Selección por coste/beneficio para ESTA tarea (verificar un artículo de ~1.000 palabras).
+# quality: 1-5 en esta tarea · cost_web / cost_noweb: $ por análisis con / sin búsqueda web
+# measured: True si el coste y la calidad se midieron con artículos reales (oct. 2026); False = estimado
+# a partir del precio por token (~5k tokens de entrada y ~15k de salida, más ~0,03 $ de búsqueda web).
 MODELS = [
     {"id": "anthropic/claude-haiku-5.5", "name": "Claude Haiku 5.5", "price": "$0,10 / $0,50",
-     "note": "Recomendado: el mejor razonamiento por su precio"},
+     "quality": 4, "cost_web": 0.04, "cost_noweb": 0.01, "measured": True, "badge": "Mejor calidad/precio",
+     "note": "Contraste completo con fuentes concretas y enlaces a las páginas exactas."},
     {"id": "google/gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash Lite", "price": "$0,10 / $0,40",
-     "note": "El más barato; menos fino al detectar falacias"},
-    {"id": "google/gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "price": "$0,30 / $2,50",
-     "note": "Gemini rápido y económico de última generación"},
-    {"id": "google/gemini-3.8-flash", "name": "Gemini 3.8 Flash", "price": "$0,75 / $3,75",
-     "note": "Gemini más capaz a precio medio"},
+     "quality": 3, "cost_web": 0.012, "cost_noweb": 0.005, "measured": True, "badge": "El más barato",
+     "note": "Análisis correcto pero más superficial; detecta menos falacias y omisiones."},
     {"id": "openai/gpt-6-luna", "name": "GPT-6 Luna", "price": "$0,10 / $0,50",
-     "note": "Alternativa de OpenAI de coste equivalente"},
+     "quality": 4, "cost_web": 0.04, "cost_noweb": 0.01, "measured": False,
+     "note": "Alternativa de OpenAI con precio equivalente a Haiku."},
     {"id": "deepseek/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash", "price": "$0,02 / $0,72",
-     "note": "Entrada casi gratis"},
+     "quality": 3, "cost_web": 0.045, "cost_noweb": 0.012, "measured": False,
+     "note": "Entrada casi gratis; útil para artículos muy largos."},
+    {"id": "google/gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "price": "$0,30 / $2,50",
+     "quality": 3, "cost_web": 0.043, "cost_noweb": 0.01, "measured": True,
+     "note": "El más rápido (~17 s), pero cita páginas de inicio genéricas en vez de las fuentes exactas."},
+    {"id": "google/gemini-3.8-flash", "name": "Gemini 3.8 Flash", "price": "$0,75 / $3,75",
+     "quality": 4, "cost_web": 0.08, "cost_noweb": 0.05, "measured": False,
+     "note": "El Gemini más capaz a precio medio."},
     {"id": "anthropic/claude-sonnet-5.5", "name": "Claude Sonnet 5.5", "price": "$2 / $10",
-     "note": "Máxima calidad para artículos complejos (≈20× más caro)"},
+     "quality": 5, "cost_web": 0.19, "cost_noweb": 0.16, "measured": False, "badge": "Máxima calidad",
+     "note": "Para artículos complejos o polémicos; unas 5 veces el coste de Haiku."},
 ]
 
 DEFAULT_SETTINGS = {

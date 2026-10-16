@@ -23,10 +23,35 @@ const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); 
 let cfg = null; // configuración del servidor (modelos, ajustes, versión)
 
 /* ---------- Inicio ---------- */
-function modelOptions(selected) {
+const usd = (v) => (v == null ? "" : `${v < 0.1 ? fmt(v, 3) : fmt(v, 2)} $`);
+const stars = (q) => "★".repeat(q || 0) + "☆".repeat(5 - (q || 0));
+
+function modelList(selected) {
   const list = [...cfg.models];
-  if (selected && !list.some((m) => m.id === selected)) list.unshift({ id: selected, name: selected, price: "", note: "modelo personalizado" });
-  return list.map((m) => `<option value="${esc(m.id)}" ${m.id === selected ? "selected" : ""}>${esc(m.name)}${m.price ? ` · ${esc(m.price)}` : ""} — ${esc(m.note)}</option>`).join("");
+  if (selected && !list.some((m) => m.id === selected)) list.unshift({ id: selected, name: selected, note: "Modelo personalizado del catálogo de OpenRouter." });
+  return list;
+}
+
+// Selector principal: nombre y coste aproximado por análisis
+function modelOptions(selected) {
+  return modelList(selected).map((m) => {
+    const cost = m.cost_web != null ? ` · ~${usd(m.cost_web)}/análisis` : "";
+    return `<option value="${esc(m.id)}" ${m.id === selected ? "selected" : ""}>${esc(m.name)}${cost}${m.badge ? ` — ${esc(m.badge)}` : ""}</option>`;
+  }).join("");
+}
+
+// Ajustes: tarjetas con calidad, coste con/sin búsqueda web y si el dato es medido o estimado
+function modelCards(selected) {
+  return modelList(selected).map((m) => `<label class="model-card ${m.id === selected ? "selected" : ""}">
+    <input type="radio" name="setModel" value="${esc(m.id)}" ${m.id === selected ? "checked" : ""}>
+    <span class="mc-body">
+      <span class="mc-top"><b>${esc(m.name)}</b>${m.badge ? `<span class="chip navy">${esc(m.badge)}</span>` : ""}</span>
+      ${m.quality ? `<span class="mc-meta"><span class="stars" title="Calidad en esta tarea: ${m.quality} de 5">${stars(m.quality)}</span>
+        <span>${usd(m.cost_web)} con web · ${usd(m.cost_noweb)} sin web</span>
+        <span class="muted">${m.measured ? "medido" : "estimado"}</span></span>` : ""}
+      <span class="mc-note">${esc(m.note)}</span>
+    </span>
+  </label>`).join("");
 }
 
 /* Almacenamiento del navegador (versión web): clave, preferencias e historial del visitante */
@@ -93,7 +118,8 @@ async function openSettings() {
   $("#toggleKey").textContent = "Mostrar";
   $("#customModel").value = "";
   keyMsg("");
-  $("#setModel").innerHTML = modelOptions(cfg.default_model);
+  $("#modelList").innerHTML = modelCards(cfg.default_model);
+  $("#signupGuide").open = !cfg.has_key;
   $("#setWeb").checked = cfg.web_search;
   $("#setWebResults").value = cfg.web_results;
   renderKeyStatus();
@@ -140,7 +166,7 @@ $("#clearKey").onclick = async () => {
 
 $("#saveSettings").onclick = async () => {
   const prefs = {
-    default_model: $("#customModel").value.trim() || $("#setModel").value,
+    default_model: $("#customModel").value.trim() || ($('input[name="setModel"]:checked') || {}).value || cfg.default_model,
     web_search: $("#setWeb").checked,
     web_results: Math.max(1, Math.min(15, Number($("#setWebResults").value) || 8)),
   };
@@ -610,3 +636,8 @@ async function loadHistoryItem(id) {
 }
 
 init();
+
+// Resalta la tarjeta de modelo elegida en Ajustes
+$("#modelList").addEventListener("change", () => {
+  $$(".model-card", $("#modelList")).forEach((c) => c.classList.toggle("selected", c.querySelector("input").checked));
+});
