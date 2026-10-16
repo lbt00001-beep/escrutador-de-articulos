@@ -6,3 +6,6 @@ openrouter_key.txt
 .claude/
 .vercel/
 .env
+
+.vercel
+.env*

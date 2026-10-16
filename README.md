@@ -8,7 +8,7 @@ Analiza un artículo periodístico (URL, PDF o texto pegado) y entrega un inform
 
 Disponible en [mbainative.com/aplicaciones](https://mbainative.com/aplicaciones). En la web cada visitante usa **su propia clave de OpenRouter**: se guarda solo en su navegador y viaja con cada análisis; el servidor no almacena claves, ajustes ni historial (el historial también vive en el navegador, últimos 25 análisis). Los PDF están limitados a 4 MB por el límite de Vercel; para documentos mayores, usa «Pegar texto».
 
-Despliegue: Vercel desde este repositorio (`vercel.json` + `api/index.py`). El modo público se activa solo en Vercel o con `ESCRUTADOR_PUBLIC=1`; en local se prueba con `python run.py 8013 --public`.
+Despliegue: Vercel desde este repositorio, que lo detecta como FastAPI y redespliega con cada push a `main` (https://escrutador-de-articulos.vercel.app). No uses reescrituras en `vercel.json`: Vercel pasaría a FastAPI la ruta reescrita y todas las páginas darían 404. El modo público se activa solo en Vercel o con `ESCRUTADOR_PUBLIC=1`; en local se prueba con `python run.py 8013 --public`.
 
 ## Uso local (Windows)
 
