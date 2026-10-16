@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 APP_YEAR = 2026
 APP_CREDIT = "By Luis Benedicto Tuzón with Claude Opus 5.5"
 

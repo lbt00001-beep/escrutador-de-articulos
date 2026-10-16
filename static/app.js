@@ -76,7 +76,7 @@ function applyConfig(c) {
   $("#model").innerHTML = modelOptions(c.default_model);
   $("#web").checked = c.web_search;
   $("#keyWarn").classList.toggle("hidden", c.has_key);
-  $("#credit").textContent = `${c.credit} · ${c.year} · v${c.version}`;
+  $("#credit").textContent = `${c.credit} · versión ${c.version} · ${c.year}`;
   $("#keyStorageNote").textContent = c.public
     ? "Se guarda solo en este navegador y se envía a OpenRouter con cada análisis; nunca se almacena en el servidor."
     : "Se guarda solo en este ordenador (data/settings.json).";
