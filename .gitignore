@@ -9,3 +9,4 @@ openrouter_key.txt
 
 .vercel
 .env*
+calibracion/resultados/*.json

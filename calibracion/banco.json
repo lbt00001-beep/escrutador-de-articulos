@@ -1,0 +1,27 @@
+{
+  "descripcion": "Banco de calibración del Escrutador. Grupo 'alta': textos de medios de referencia (se asume calidad profesional, no perfección). Grupo 'baja': textos SINTÉTICOS escritos para las pruebas, con falsedades deliberadas y comprobables. Objetivo: separar ambos grupos y dar notas estables al repetir.",
+  "objetivos": {
+    "alta_global_min": 6.5,
+    "baja_global_max": 3.5,
+    "baja_fiabilidad_max": 3.0,
+    "desviacion_max": 0.5
+  },
+  "textos": [
+    {"id": "innerarity-conservadores", "grupo": "alta", "tipo": "columna", "url": "https://elpais.com/opinion/2026-10-15/nostalgia-de-los-conservadores.html"},
+    {"id": "elhachmi-rufian", "grupo": "alta", "tipo": "columna", "url": "https://elpais.com/opinion/2026-10-16/rufian-pijoaparte.html"},
+    {"id": "camacho-nietos", "grupo": "alta", "tipo": "columna", "url": "https://www.abc.es/opinion/ignacio-camacho-nietos-derechas-20261014191223-nt.html"},
+    {"id": "tribuna-europa-ia", "grupo": "alta", "tipo": "columna", "url": "https://elpais.com/opinion/2026-10-16/europa-y-la-ia-mas-ilustracion-y-menos-inquisicion.html"},
+    {"id": "opinion-generacion", "grupo": "alta", "tipo": "columna", "url": "https://elpais.com/opinion/2026-10-16/el-despertar-politico-de-una-generacion-maltratada.html"},
+    {"id": "opinion-profesores", "grupo": "alta", "tipo": "columna", "url": "https://elpais.com/opinion/2026-10-15/escuchar-a-los-profesores.html"},
+    {"id": "noticia-funcionarios", "grupo": "alta", "tipo": "noticia", "url": "https://www.eldiario.es/economia/sindicatos-presionan-gobierno-apruebe-subida-salarial-funcionarios-4-5-2027_1_13587428.html"},
+    {"id": "noticia-supremo-permiso", "grupo": "alta", "tipo": "noticia", "url": "https://www.eldiario.es/economia/supremo-rechaza-empresas-limiten-permiso-cuidar-familiares-graves-cinco-dias-ano_1_13592361.html"},
+    {"id": "noticia-consumo-expediente", "grupo": "alta", "tipo": "noticia", "url": "https://www.eldiario.es/economia/consumo-abre-expediente-gran-empresa-telecomunicaciones-practicas-abusivas_1_13590059.html"},
+    {"id": "noticia-regularizacion-ue", "grupo": "alta", "tipo": "noticia", "url": "https://www.eldiario.es/internacional/dinamarca-polonia-e-italia-presionan-consejo-europeo-censure-regularizacion-migratoria-espana_1_13591978.html"},
+    {"id": "noticia-rufian-lista", "grupo": "alta", "tipo": "noticia", "url": "https://www.eldiario.es/catalunya/rufian-cuenta-lista-unitaria-hemos-fracasado-probable-no-pase_1_13589935.html"},
+    {"id": "sintetico-bulo-paro", "grupo": "baja", "tipo": "bulo", "archivo": "textos/sintetico-bulo-paro.txt"},
+    {"id": "sintetico-bulo-poblacion", "grupo": "baja", "tipo": "bulo", "archivo": "textos/sintetico-bulo-poblacion.txt"},
+    {"id": "sintetico-propaganda-energia", "grupo": "baja", "tipo": "propaganda", "archivo": "textos/sintetico-propaganda-energia.txt"},
+    {"id": "sintetico-clickbait-clima", "grupo": "baja", "tipo": "bulo", "archivo": "textos/sintetico-clickbait-clima.txt"},
+    {"id": "sintetico-columna-sin-base", "grupo": "baja", "tipo": "columna", "archivo": "textos/sintetico-columna-sin-base.txt"}
+  ]
+}

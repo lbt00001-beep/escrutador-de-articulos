@@ -1,8 +1,8 @@
-# Escrutador de Artículos · versión 1.4.1
+# Escrutador de Artículos · versión 2.0.0
 
 Analiza un artículo periodístico (URL, PDF o texto pegado) y entrega un informe de calidad con nota de 0 a 10: datos en los que se apoya el autor, contraste de esos datos con fuentes externas, ideas principales y secundarias calificadas, falacias, omisiones y una valoración final razonada.
 
-*By Luis Benedicto Tuzón with Claude Opus 5.5 · versión 1.4.1 · 2026*
+*By Luis Benedicto Tuzón with Claude Opus 5.5 · versión 2.0.0 · 2026*
 
 ## Versión web
 
@@ -40,24 +40,39 @@ Si el texto leído es muy corto (< 400 palabras), el informe avisa de que puede 
 
 1. **Extracción** (sin IA): `trafilatura` saca el cuerpo, título, autor, fecha, medio y enlaces externos; `PyMuPDF` hace lo mismo con PDFs.
 2. **Indicadores objetivos** (sin IA): legibilidad (Fernández-Huerta / Flesch), palabras por frase, densidad de cifras, citas textuales, atribuciones de fuentes, enlaces, lenguaje cargado, absolutos, matizadores y marcas de primera persona.
-3. **Análisis con IA** (OpenRouter, salida JSON + búsqueda web para contrastar):
-   - **Datos del autor**: cifras, estudios y declaraciones en que se apoya, con la fuente citada (o «Sin fuente»).
-   - **Contraste**: afirmaciones verificables con veredicto, evidencia concreta y enlaces a las fuentes consultadas.
-   - **Ideas principales y secundarias**, cada una seguida de su calificación en azul oscuro: *Correcto, Mayormente correcto, Parcialmente correcto, Engañoso, Incorrecto, No verificable, Opinión*.
-   - **Rigor**: falacias y sesgos, contexto omitido, perspectivas presentes y ausentes.
-4. **Nota 0-10** calculada en Python como media ponderada de 7 criterios:
+3. **Análisis con IA** (OpenRouter, salida JSON + búsqueda web para contrastar), con el método de los criterios v2:
+   1. **Género**: noticia, opinión/columna, editorial, análisis, reportaje, entrevista, divulgación o comunicado. Lo detecta la IA y el usuario puede fijarlo.
+   2. **Clasificación previa** de las afirmaciones en *hecho, interpretación, valoración, recurso retórico* o *predicción*, marcando las centrales. Una hipérbole o una intención atribuida no se verifican como si fueran hechos.
+   3. **Contraste solo de los hechos**, con veredicto (*Correcto, Mayormente correcto, Parcialmente correcto, Engañoso, Incorrecto, No verificable*), **confianza** (alta/media/baja), evidencia y enlaces a las fuentes consultadas.
+   4. **Ideas principales y secundarias**, cada una seguida de su calificación en azul oscuro: los hechos por su exactitud y las opiniones por su fundamento (*Opinión bien fundamentada, discutible, sin fundamento*).
+   5. **Rigor con mesura**: solo falacias claras (con confianza) y omisiones que cambiarían la conclusión. No hay cuota: una lista vacía es una respuesta válida.
+   6. **Calidad**: el modelo puntúa diez criterios con una escala anclada (9-10 referencia del género, 7-8 lo esperable en un medio serio, 5-6 correcto con carencias…), empezando por las fortalezas.
+4. **Dos notas y una global**, calculadas en Python (`app/scoring.py`), sin IA:
+   - **Fiabilidad factual**: media de los hechos verificados (Correcto 10, Mayormente 8, Parcialmente 5, Engañoso 2,5, Incorrecto 0). Los hechos centrales pesan el doble y los de confianza baja no cuentan. Si no hay hechos verificables, no se calcula.
+   - **Calidad según el género**, con estas rúbricas:
 
-| Criterio | Peso |
-|---|---|
-| Respaldo factual | 20 % |
-| Exactitud (calculada a partir de los veredictos del contraste) | 25 % |
-| Rigor argumental | 15 % |
-| Contexto y omisiones | 10 % |
-| Equilibrio de perspectivas | 10 % |
-| Hechos vs. opinión | 10 % |
-| Neutralidad del lenguaje | 10 % |
+| Criterio | Noticia | Opinión / Editorial | Análisis / Divulgación | Reportaje / Entrevista |
+|---|---|---|---|---|
+| Atribución de fuentes | 30 % | — | 15 % | 20 % |
+| Equilibrio de voces | 20 % | — | — | 15 % |
+| Contexto | 20 % | 10 % | 15 % | 15 % |
+| Neutralidad del lenguaje | 15 % | — | — | 10 % |
+| Claridad y escritura | 15 % | 15 % | 15 % | 15 % |
+| Solidez argumental | — | 30 % | 25 % | — |
+| Honestidad intelectual | — | 20 % | 10 % | — |
+| Originalidad y aporte | — | 20 % | — | — |
+| Profundidad y trabajo propio | — | — | 20 % | 25 % |
+| Respeto en el debate | — | 5 % | — | — |
+| **Peso de la fiabilidad en la nota global** | 50 % | 35 % | 45 % | 45 % |
 
-   Límites: si una idea principal es incorrecta o engañosa, la nota máxima es 5; con dos o más afirmaciones incorrectas, 6,5.
+   - **Límite**: solo una falsedad *central* y con *confianza alta* limita la nota global a 5 (dos o más, a 4). Las interpretaciones nunca la limitan.
+   - En el informe se puede cambiar el género para ver cómo se valoraría con otra rúbrica: se recalcula al instante, sin volver a pagar el análisis.
+
+Los indicadores objetivos son descriptivos y no entran en la nota (una prosa culta da una legibilidad baja sin ser peor).
+
+### Calibración
+
+`calibracion/` contiene un banco de prueba con textos de medios de referencia y textos sintéticos de desinformación, y `scripts/calibrar.py` comprueba que las notas separan ambos grupos y son estables al repetir. Ver `calibracion/LEEME.md` y los informes en `calibracion/resultados/`.
 
 Los análisis se guardan en `data/historial/` y se pueden reabrir desde **Historial**. Cada informe se exporta a Markdown o a PDF (botón PDF → «Guardar como PDF»); el archivo se llama «Autor - Título - Medio - Fecha», p. ej. `Daniel Innerarity - Nostalgia de los conservadores - EL PAÍS - 2026-10-15.pdf`.
 
@@ -81,7 +96,10 @@ La lista está en `app/config.py`. Si un modelo falla con el modo JSON forzado d
 app/config.py    versión, ajustes, clave, modelos
 app/extract.py   extracción de URL (curl_cffi + archive.org), PDF y texto pegado
 app/metrics.py   indicadores objetivos
-app/analyze.py   prompt, esquema JSON, llamada a OpenRouter y nota final
+app/analyze.py   prompt, esquema JSON y llamada a OpenRouter (criterios v2)
+app/scoring.py   notas de fiabilidad y calidad por género (sin IA)
+scripts/calibrar.py  banco de calibración
+tests/           pruebas de las notas: python -m unittest discover tests
 app/main.py      API FastAPI: ajustes, análisis e historial (modo local y público)
 api/index.py     punto de entrada para Vercel
 static/          interfaz (HTML, CSS, JS)

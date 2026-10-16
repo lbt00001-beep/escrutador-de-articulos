@@ -3,11 +3,15 @@
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
-const VERDICTS = ["Correcto", "Mayormente correcto", "Parcialmente correcto", "Engañoso", "Incorrecto", "No verificable", "Opinión"];
+const VERDICTS = ["Correcto", "Mayormente correcto", "Parcialmente correcto", "Engañoso", "Incorrecto", "No verificable",
+  "Opinión bien fundamentada", "Opinión discutible", "Opinión sin fundamento", "Opinión"];
 const VERDICT_COLOR = {
   "Correcto": "var(--ok)", "Mayormente correcto": "var(--ok-2)", "Parcialmente correcto": "var(--mid)",
   "Engañoso": "var(--warn)", "Incorrecto": "var(--bad)", "No verificable": "var(--na)", "Opinión": "var(--op)",
+  "Opinión bien fundamentada": "var(--op)", "Opinión discutible": "var(--op-2)", "Opinión sin fundamento": "var(--op-3)",
 };
+const CLAIM_CLASSES = ["Hecho", "Interpretación", "Valoración", "Recurso retórico", "Predicción"];
+let genres = null; // géneros y rúbricas del servidor
 
 let mode = "url";
 let pdfFile = null;
@@ -86,6 +90,8 @@ function applyConfig(c) {
 async function init() {
   try {
     applyConfig(await api("/api/config"));
+    genres = await api("/api/genres");
+    $("#genre").insertAdjacentHTML("beforeend", genres.generos.map((g) => `<option>${esc(g)}</option>`).join(""));
     if (!cfg.has_key) openSettings();
   } catch {
     showError("No se pudo conectar con el servidor.");
@@ -241,7 +247,7 @@ $("#form").addEventListener("submit", async (e) => {
       method: "POST",
       headers: { "Content-Type": "application/json", ...keyHeaders() },
       body: JSON.stringify({ article: ext.article, metrics: ext.metrics, model: $("#model").value,
-        web_search: $("#web").checked, web_results: cfg.web_results }),
+        web_search: $("#web").checked, web_results: cfg.web_results, genero: $("#genre").value || null }),
     });
     if (isPublic()) saveLocalRecord(rec);
     step("score");
@@ -282,6 +288,32 @@ function showError(msg) { const e = $("#error"); e.textContent = msg; e.classLis
 function hideError() { $("#error").classList.add("hidden"); }
 
 /* ---------- Render del informe ---------- */
+const isV2 = (p) => Boolean(p && p.version === 2);
+const pct = (w) => `${Math.round(w * 100)} %`;
+
+function genreSelect(p) {
+  const list = (genres && genres.generos) || [p.genero];
+  return `<label class="genre-pick">Evaluado como
+    <select id="genrePick">${list.map((g) => `<option ${g === p.genero ? "selected" : ""}>${esc(g)}</option>`).join("")}</select>
+    ${p.genero !== p.genero_detectado ? `<span class="muted small">(la IA lo detectó como ${esc(p.genero_detectado)})</span>` : ""}
+  </label>`;
+}
+
+function headScore(p) {
+  if (!isV2(p)) {
+    return `<div class="score">${dial(p.nota)}<div class="label" style="color:${scoreColor(p.nota)}">${esc(p.etiqueta || "")}</div>
+      ${p.limite ? `<div class="cap">${esc(p.limite)}</div>` : ""}
+      <div class="legacy-note">Criterios antiguos (v1). Vuelve a analizarlo para obtener fiabilidad y calidad por separado.</div></div>`;
+  }
+  const f = p.fiabilidad, c = p.calidad;
+  return `<div class="score">${dial(p.nota)}<div class="label" style="color:${scoreColor(p.nota)}">${esc(p.etiqueta)}</div>
+    ${p.limite ? `<div class="cap">${esc(p.limite)}</div>` : ""}
+    <div class="subscores">
+      <div><span class="k">Fiabilidad</span><span class="v" style="color:${scoreColor(f.nota)}">${f.nota == null ? "—" : fmt(f.nota)}</span><span class="l">${esc(f.etiqueta)}</span></div>
+      <div><span class="k">Calidad</span><span class="v" style="color:${scoreColor(c.nota)}">${fmt(c.nota)}</span><span class="l">${esc(c.etiqueta)}</span></div>
+    </div></div>`;
+}
+
 function render(rec) {
   current = rec;
   const { article: a, metrics: m, result: r } = rec;
@@ -294,7 +326,7 @@ function render(rec) {
   <article class="card">
     <div class="report-head">
       <div>
-        <div class="kicker"><span class="chip navy">${esc(r.tipo_texto || "Artículo")}</span><span class="chip">${esc(m.idioma)} · ${fmt(m.palabras, 0)} palabras · ${m.minutos_lectura} min</span></div>
+        <div class="kicker">${isV2(p) ? genreSelect(p) : `<span class="chip navy">${esc(r.tipo_texto || "Artículo")}</span>`}<span class="chip">${esc(m.idioma)} · ${fmt(m.palabras, 0)} palabras · ${m.minutos_lectura} min</span></div>
         <h2>${esc(title)}</h2>
         <div class="byline">${byline}</div>
         ${m.posible_texto_parcial ? `<p class="warn" style="margin:0 0 14px">Solo se han podido leer ${fmt(m.palabras, 0)} palabras. Si el artículo es de pago o está incompleto, cópialo desde el navegador en «Pegar texto» o súbelo en PDF para un análisis completo.</p>` : ""}
@@ -302,8 +334,7 @@ function render(rec) {
         <p class="summary">${esc(r.resumen)}</p>
         <div class="thesis"><b>Tesis del autor:</b> ${esc(r.tesis)}</div>
       </div>
-      <div class="score">${dial(p.nota)}<div class="label" style="color:${scoreColor(p.nota)}">${esc(p.etiqueta || "")}</div>
-        ${p.limite ? `<div class="cap">${esc(p.limite)}</div>` : ""}</div>
+      ${headScore(p)}
     </div>
   </article>
 
@@ -329,7 +360,6 @@ function render(rec) {
   el.classList.remove("hidden");
   $("#intake").classList.add("hidden");
   $("#progress").classList.add("hidden");
-  window.scrollTo({ top: 0 });
   requestAnimationFrame(() => { const arc = $(".dial .arc"); if (arc) arc.style.strokeDashoffset = arc.dataset.target; });
   el.querySelector('[data-act="md"]').onclick = downloadMarkdown;
   el.querySelector('[data-act="print"]').onclick = () => window.print();
@@ -342,6 +372,24 @@ function render(rec) {
     toggle.textContent = collapsed ? "Leer el artículo completo" : "Contraer el texto";
     if (collapsed) $("#s-texto").scrollIntoView({ behavior: "smooth" });
   };
+  const pick = $("#genrePick");
+  if (pick) pick.onchange = () => regrade(pick.value);
+}
+
+/* Re-evalúa como otro género con los criterios ya puntuados: sin IA y sin coste */
+async function regrade(genero) {
+  try {
+    const p = await api("/api/rescore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ result: current.result, genero, record_id: isPublic() ? null : current.id }),
+    });
+    current.result.puntuacion = p;
+    if (isPublic()) saveLocalRecord(current);
+    const y = window.scrollY;
+    render(current);
+    window.scrollTo({ top: y });
+  } catch (e) { showError(e.message); }
 }
 
 function scoreColor(n) {
@@ -407,15 +455,35 @@ function distribution(items) {
     <div class="legend">${present.map((v) => `${verdict(v)} <span class="muted">${counts[v]}</span>`).join("")}</div>`;
 }
 
+/* Clasificación previa: qué se verifica (hechos) y qué no (interpretaciones, valoraciones, retórica) */
+function claimClasses(r) {
+  const claims = r.afirmaciones || [];
+  if (!claims.length) return "";
+  const counts = {};
+  claims.forEach((c) => { counts[c.clase] = (counts[c.clase] || 0) + 1; });
+  const others = claims.filter((c) => c.clase !== "Hecho");
+  return `<div class="classes">
+      <span class="small muted">Afirmaciones clasificadas antes de verificar:</span>
+      ${CLAIM_CLASSES.filter((k) => counts[k]).map((k) => `<span class="chip cls cls-${slug(k)}">${esc(k)} · ${counts[k]}</span>`).join("")}
+    </div>
+    ${others.length ? `<details class="not-verified"><summary>Ver las ${others.length} afirmaciones que no se verifican porque no son hechos</summary>
+      <ul>${others.map((c) => `<li><span class="chip cls cls-${slug(c.clase)}">${esc(c.clase)}</span>${c.central ? `<span class="tag-central">central</span>` : ""} ${esc(c.texto)}</li>`).join("")}</ul>
+    </details>` : ""}`;
+}
+
 function sectionVerificacion(r) {
   const items = r.verificacion || [];
-  if (!items.length) return section("s-verif", 2, "Contraste de los datos", "", `<p class="empty">No hay afirmaciones verificables relevantes.</p>`);
-  return section("s-verif", 2, "Contraste de los datos",
-    "Datos externos que confirman o refutan lo que afirma el artículo.",
-    `${distribution(items)}<div class="claims">${items.map((c) => {
+  const v2 = isV2(r.puntuacion);
+  const sub = v2
+    ? "Solo se verifican los hechos. Las interpretaciones, valoraciones y recursos retóricos se juzgan en las secciones 3 y 6."
+    : "Datos externos que confirman o refutan lo que afirma el artículo.";
+  if (!items.length) return section("s-verif", 2, "Contraste de los hechos", sub, `${claimClasses(r)}<p class="empty">No hay hechos verificables relevantes.</p>`);
+  return section("s-verif", 2, "Contraste de los hechos", sub,
+    `${claimClasses(r)}${distribution(items)}<div class="claims">${items.map((c) => {
       const links = (c.fuentes || []).filter((f) => safeUrl(f.url));
       return `<div class="claim" style="--vc:${VERDICT_COLOR[c.veredicto] || "var(--na)"}">
-        <div class="claim-top"><div class="claim-q">${esc(c.afirmacion)}</div>${verdict(c.veredicto)}</div>
+        <div class="claim-top"><div class="claim-q">${c.central ? `<span class="tag-central">central</span>` : ""}${esc(c.afirmacion)}</div>
+          <div class="claim-v">${verdict(c.veredicto)}${c.confianza ? `<span class="conf conf-${esc(c.confianza)}">confianza ${esc(c.confianza)}</span>` : ""}</div></div>
         <p><span class="ev-label">Evidencia · </span>${esc(c.evidencia)}</p>
         ${links.length ? `<ul class="links">${links.map((f) => `<li><a href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.titulo)}">${esc(hostOf(f.url))} · ${esc(f.titulo)}</a></li>`).join("")}</ul>` : ""}
       </div>`;
@@ -427,7 +495,7 @@ function sectionIdeas(r) {
   const all = ideas.flatMap((i) => [i, ...(i.secundarias || [])]);
   const rating = (i) => `<div class="idea-rating"><span class="sep">→</span>${verdict(i.veredicto)}${esc(i.justificacion)}</div>`;
   return section("s-ideas", 3, "Ideas principales y secundarias",
-    "Cada idea va seguida de su calificación.",
+    isV2(r.puntuacion) ? "Los hechos se califican por su exactitud; las opiniones, por lo bien fundamentadas que están." : "Cada idea va seguida de su calificación.",
     `${distribution(all)}<ol class="ideas">${ideas.map((i) => `<li>
       <div class="idea-text">${esc(i.idea)}</div>${rating(i)}
       ${(i.secundarias || []).length ? `<ul class="secondary">${i.secundarias.map((s) => `<li><div class="idea-text"><span class="tag">Secundaria</span>${esc(s.idea)}</div>${rating(s)}</li>`).join("")}</ul>` : ""}
@@ -436,16 +504,18 @@ function sectionIdeas(r) {
 
 function sectionRigor(r) {
   const fal = r.falacias_y_sesgos || [];
-  const om = r.omisiones || [];
+  const om = (r.omisiones || []).map((o) => (typeof o === "string" ? { omision: o } : o));
   const pp = r.perspectivas || {};
-  return section("s-rigor", 4, "Rigor argumental y contexto", "Falacias, sesgos, omisiones y pluralidad de puntos de vista.",
+  const conf = (c) => (c ? `<span class="conf conf-${esc(c)}">confianza ${esc(c)}</span>` : "");
+  return section("s-rigor", 4, "Rigor argumental y contexto",
+    "Solo se señalan los problemas claros; una lista vacía es buena señal, no un fallo del análisis.",
     `<div class="grid2">
-      <div class="box"><h4>Falacias y sesgos detectados (${fal.length})</h4>
-        ${fal.length ? fal.map((f) => `<div class="fallacy"><b>${esc(f.tipo)}</b><q>“${esc(f.fragmento)}”</q><span class="muted small">${esc(f.explicacion)}</span></div>`).join("") : `<p class="empty">No se detectan falacias relevantes.</p>`}
+      <div class="box"><h4>Falacias y sesgos (${fal.length})</h4>
+        ${fal.length ? fal.map((f) => `<div class="fallacy"><b>${esc(f.tipo)}</b> ${conf(f.confianza)}<q>“${esc(f.fragmento)}”</q><span class="muted small">${esc(f.explicacion)}</span></div>`).join("") : `<p class="empty">No se detectan falacias claras.</p>`}
       </div>
       <div>
-        <div class="box"><h4>Contexto omitido (${om.length})</h4>
-          ${om.length ? `<ul class="plain">${om.map((o) => `<li>${esc(o)}</li>`).join("")}</ul>` : `<p class="empty">Sin omisiones relevantes.</p>`}</div>
+        <div class="box"><h4>Contexto omitido que cambiaría la conclusión (${om.length})</h4>
+          ${om.length ? `<ul class="plain">${om.map((o) => `<li>${esc(o.omision)}${o.relevancia ? ` <span class="conf conf-${o.relevancia === "alta" ? "alta" : "media"}">relevancia ${esc(o.relevancia)}</span>` : ""}</li>`).join("")}</ul>` : `<p class="empty">Sin omisiones relevantes.</p>`}</div>
         <div class="box" style="margin-top:20px"><h4>Perspectivas presentes</h4>
           <div class="persp-list">${(pp.presentes || []).map((x) => `<span class="chip">${esc(x)}</span>`).join("") || `<span class="empty">—</span>`}</div></div>
         <div class="box" style="margin-top:16px"><h4>Perspectivas ausentes</h4>
@@ -457,7 +527,7 @@ function sectionRigor(r) {
 function sectionIndicadores(m) {
   const stat = (k, v, h) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div><div class="h">${h}</div></div>`;
   return section("s-ind", 5, "Indicadores objetivos del texto",
-    "Medidas calculadas automáticamente sobre el texto, sin intervención de la IA.",
+    "Medidas calculadas automáticamente sobre el texto, sin intervención de la IA. Son descriptivas: no entran en la nota (una prosa culta da legibilidad baja sin ser peor).",
     `<div class="stats">
       ${stat("Legibilidad", fmt(m.legibilidad), `${esc(m.legibilidad_nivel)} (índice ${esc(m.legibilidad_indice)})`)}
       ${stat("Palabras por frase", fmt(m.palabras_por_frase), m.palabras_por_frase > 28 ? "Frases largas" : "Longitud adecuada")}
@@ -472,24 +542,49 @@ function sectionIndicadores(m) {
     </div>`);
 }
 
+function rubricBars(desglose) {
+  return `<div class="rubric">${(desglose || []).map((c) => `<div>
+      <div class="crit-top"><span class="crit-name">${esc(c.nombre)}<small>peso ${pct(c.peso)}</small></span><span class="crit-val">${fmt(c.puntuacion)}</span></div>
+      <div class="bar"><span style="width:${c.puntuacion * 10}%;background:${scoreColor(c.puntuacion)}"></span></div>
+      <div class="crit-just">${esc(c.justificacion)}</div>
+      ${c.origen && c.origen !== "Evaluación del modelo" ? `<div class="crit-origin">${esc(c.origen)}</div>` : ""}
+    </div>`).join("")}</div>`;
+}
+
 function sectionValoracion(r, p) {
   const meta = r._meta || {};
   const webs = meta.fuentes_web || [];
+  let body;
+  if (isV2(p)) {
+    const f = p.fiabilidad, c = p.calidad;
+    const formula = f.nota == null
+      ? "No hay hechos verificables con confianza suficiente, así que la nota global es la de calidad."
+      : `Nota global = ${pct(p.peso_fiabilidad)} fiabilidad (${fmt(f.nota)}) + ${pct(1 - p.peso_fiabilidad)} calidad (${fmt(c.nota)}), según la rúbrica de «${esc(p.genero)}».`;
+    body = `<p class="formula">${formula}</p>
+      <div class="two-scores">
+        <div class="score-block">
+          <h4>Fiabilidad factual <span style="color:${scoreColor(f.nota)}">${f.nota == null ? "—" : fmt(f.nota)}</span></h4>
+          <p class="small">${esc(f.etiqueta)}. Calculada a partir de ${f.hechos_contados} de ${f.hechos_verificados} hechos verificados: los centrales pesan el doble y los de confianza baja no cuentan. Correcto 10 · Mayormente correcto 8 · Parcialmente 5 · Engañoso 2,5 · Incorrecto 0. Con pocos hechos, la nota se modera hacia 6 para que un solo veredicto no la lleve a un extremo.</p>
+        </div>
+        <div class="score-block">
+          <h4>Calidad como ${esc(p.genero)} <span style="color:${scoreColor(c.nota)}">${fmt(c.nota)}</span></h4>
+          <p class="small">${esc(c.etiqueta)}. Criterios y pesos propios del género; cambia el género arriba para ver cómo se valoraría con otra rúbrica.</p>
+        </div>
+      </div>
+      ${rubricBars(c.desglose)}`;
+  } else {
+    body = `<p class="formula">Análisis hecho con los criterios antiguos (v1): una sola nota con siete criterios iguales para todos los géneros.</p>${rubricBars(p.desglose)}`;
+  }
   return section("s-val", 6, `Valoración final: ${fmt(p.nota)} / 10`,
-    "Media ponderada de siete criterios. La exactitud se calcula a partir de los veredictos de la sección 2.",
-    `<div class="rubric">${(p.desglose || []).map((c) => `<div>
-      <div class="crit-top"><span class="crit-name">${esc(c.nombre)}<small>peso ${Math.round(c.peso * 100)} %</small></span><span class="crit-val">${fmt(c.puntuacion)}</span></div>
-      <div class="bar"><span style="width:${c.puntuacion * 10}%;background:${scoreColor(c.puntuacion)}"></span></div>
-      <div class="crit-just">${esc(c.justificacion)}</div>
-      ${c.origen !== "Evaluación del modelo" ? `<div class="crit-origin">${esc(c.origen)}</div>` : ""}
-    </div>`).join("")}</div>
+    isV2(p) ? "Dos preguntas distintas: ¿son ciertos los hechos? (fiabilidad) y ¿es un buen texto de su género? (calidad)." : "",
+    `${body}
     ${p.limite ? `<p class="warn">${esc(p.limite)} Nota sin límite: ${fmt(p.nota_sin_limite)}.</p>` : ""}
     <div class="grid2">
       <div class="box"><h4>Fortalezas</h4><ul class="plain">${(r.fortalezas || []).map((x) => `<li>${esc(x)}</li>`).join("") || "<li>—</li>"}</ul></div>
       <div class="box"><h4>Debilidades</h4><ul class="plain">${(r.debilidades || []).map((x) => `<li>${esc(x)}</li>`).join("") || "<li>—</li>"}</ul></div>
     </div>
     <div class="verdict-box"><h4>Valoración global</h4><p>${esc(r.valoracion_global)}</p></div>
-    <div class="meta-line">Modelo: ${esc(meta.modelo)} · Búsqueda web: ${meta.busqueda_web ? "sí" : "no"}
+    <div class="meta-line">Modelo: ${esc(meta.modelo)} · Búsqueda web: ${meta.busqueda_web ? "sí" : "no"} · Criterios v${meta.criterios_version || 1}
       ${meta.coste_usd != null ? ` · Coste: ${fmt(meta.coste_usd, 4)} $` : ""}
       ${meta.tokens_entrada ? ` · Tokens: ${fmt(meta.tokens_entrada, 0)} / ${fmt(meta.tokens_salida, 0)}` : ""}
       · Analizado el ${esc(new Date(current.fecha_analisis).toLocaleString("es-ES"))}</div>
@@ -540,16 +635,30 @@ function downloadMarkdown() {
   const L = [];
   L.push(`# ${a.title || r.titulo_inferido}`, "");
   L.push([a.author, outletName(a.source), a.date, a.url].filter(Boolean).join(" · "), "");
-  L.push(`**Nota: ${p.nota}/10 — ${p.etiqueta}**  `, `Tipo: ${r.tipo_texto}`, "", `> ${r.resumen}`, "", `**Tesis:** ${r.tesis}`, "");
+  if (isV2(p)) {
+    const f = p.fiabilidad, c = p.calidad;
+    L.push(`**Nota global: ${p.nota}/10 — ${p.etiqueta}**  `,
+      `Fiabilidad factual: ${f.nota == null ? "sin hechos verificables" : `${f.nota}/10 (${f.etiqueta})`}  `,
+      `Calidad como ${p.genero}: ${c.nota}/10 (${c.etiqueta})  `,
+      `Género detectado: ${p.genero_detectado}`, "");
+  } else {
+    L.push(`**Nota: ${p.nota}/10 — ${p.etiqueta}** (criterios v1)  `, `Tipo: ${r.tipo_texto}`, "");
+  }
+  L.push(`> ${r.resumen}`, "", `**Tesis:** ${r.tesis}`, "");
   L.push("## Texto original del artículo", "");
   if (a.url) L.push(`Fuente: ${a.url}${a.archived_from ? ` (leído desde ${a.archived_from})` : ""}`, "");
-  String(a.text || "").split(/\n+/).map((p) => p.trim()).filter(Boolean).forEach((p) => L.push(`> ${p}`, ">"));
+  String(a.text || "").split(/\n+/).map((x) => x.trim()).filter(Boolean).forEach((x) => L.push(`> ${x}`, ">"));
   L.push("");
   L.push("## 1. Datos en los que se apoya el autor", "");
   (r.datos_del_autor || []).forEach((d) => L.push(`- ${d.dato} — *Fuente:* ${d.fuente_citada} (${d.tipo_fuente})`));
-  L.push("", "## 2. Contraste de los datos", "");
+  L.push("", "## 2. Contraste de los hechos", "");
+  if ((r.afirmaciones || []).length) {
+    const counts = {};
+    r.afirmaciones.forEach((c) => { counts[c.clase] = (counts[c.clase] || 0) + 1; });
+    L.push(`Afirmaciones clasificadas: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(" · ")}`, "");
+  }
   (r.verificacion || []).forEach((c) => {
-    L.push(`- **${c.afirmacion}** → **${c.veredicto}**`, `  ${c.evidencia}`);
+    L.push(`- ${c.central ? "[central] " : ""}**${c.afirmacion}** → **${c.veredicto}**${c.confianza ? ` (confianza ${c.confianza})` : ""}`, `  ${c.evidencia}`);
     (c.fuentes || []).filter((f) => f.url).forEach((f) => L.push(`  - [${f.titulo}](${f.url})`));
   });
   L.push("", "## 3. Ideas principales y secundarias", "");
@@ -558,9 +667,11 @@ function downloadMarkdown() {
     (i.secundarias || []).forEach((s) => L.push(`   - ${s.idea} → **${s.veredicto}**: ${s.justificacion}`));
   });
   L.push("", "## 4. Rigor", "");
-  (r.falacias_y_sesgos || []).forEach((f) => L.push(`- **${f.tipo}**: “${f.fragmento}” — ${f.explicacion}`));
-  (r.omisiones || []).forEach((o) => L.push(`- Omisión: ${o}`));
-  L.push("", "## 5. Valoración", "", "| Criterio | Peso | Nota |", "|---|---|---|");
+  (r.falacias_y_sesgos || []).forEach((f) => L.push(`- **${f.tipo}**${f.confianza ? ` (confianza ${f.confianza})` : ""}: “${f.fragmento}” — ${f.explicacion}`));
+  (r.omisiones || []).forEach((o) => L.push(`- Omisión: ${typeof o === "string" ? o : `${o.omision} (relevancia ${o.relevancia})`}`));
+  L.push("", "## 5. Valoración", "");
+  if (isV2(p)) L.push(`Rúbrica de «${p.genero}». Nota global = ${Math.round(p.peso_fiabilidad * 100)} % fiabilidad + ${Math.round((1 - p.peso_fiabilidad) * 100)} % calidad.`, "");
+  L.push("| Criterio | Peso | Nota |", "|---|---|---|");
   (p.desglose || []).forEach((c) => L.push(`| ${c.nombre} | ${Math.round(c.peso * 100)} % | ${c.puntuacion} |`));
   if (p.limite) L.push("", `*${p.limite}*`);
   L.push("", `**Nota final: ${p.nota}/10**`, "", r.valoracion_global, "");

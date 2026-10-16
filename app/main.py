@@ -169,6 +169,38 @@ class AnalyzeRequest(BaseModel):
     model: str | None = None
     web_search: bool | None = None
     web_results: int | None = None
+    genero: str | None = None  # None = lo detecta la IA
+
+
+@app.get("/api/genres")
+def genres():
+    from .scoring import GENRES, QUALITY_CRITERIA, RUBRICS
+    return {"generos": GENRES,
+            "rubricas": {g: {"peso_fiabilidad": r["peso_fiabilidad"],
+                             "criterios": {k: {"nombre": QUALITY_CRITERIA[k][0], "peso": w}
+                                           for k, w in r["criterios"].items()}}
+                         for g, r in RUBRICS.items()}}
+
+
+class RescoreRequest(BaseModel):
+    result: dict
+    genero: str
+    record_id: str | None = None
+
+
+@app.post("/api/rescore")
+def rescore(req: RescoreRequest):
+    """Recalcula las notas como otro género con los criterios ya puntuados (sin IA, sin coste)."""
+    try:
+        puntuacion = analyze.rescore(req.result, req.genero)
+    except analyze.AnalysisError as e:
+        raise HTTPException(400, str(e))
+    if not IS_PUBLIC and req.record_id:
+        path = _history_path(req.record_id)
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        rec["result"]["puntuacion"] = puntuacion
+        path.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
+    return puntuacion
 
 
 @app.post("/api/analyze")
@@ -182,7 +214,8 @@ async def analyze_article(req: AnalyzeRequest, x_openrouter_key: str | None = He
     web = settings["web_search"] if req.web_search is None else req.web_search
     web_results = max(1, min(15, req.web_results or settings["web_results"]))
     try:
-        result = await run_in_threadpool(analyze.run, req.article, req.metrics, model, web, key, web_results)
+        result = await run_in_threadpool(analyze.run, req.article, req.metrics, model, web, key, web_results,
+                                         req.genero)
     except analyze.AnalysisError as e:
         raise HTTPException(502, str(e))
     record = {
