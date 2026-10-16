@@ -1,0 +1,8 @@
+.venv/
+data/
+__pycache__/
+*.pyc
+openrouter_key.txt
+.claude/
+.vercel/
+.env
