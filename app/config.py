@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 APP_YEAR = 2026
 APP_CREDIT = "By Luis Benedicto Tuzón with Claude Opus 5.5"
 
@@ -62,6 +62,9 @@ MODELS = [
      "quality": 5, "cost_web": 0.19, "cost_noweb": 0.16, "measured": False, "badge": "Máxima calidad",
      "note": "Para artículos complejos o polémicos; unas 5 veces el coste de Haiku."},
 ]
+
+# Modo rápido: cribado barato (~0,005 $, ~20 s) sin búsqueda web; los datos no se contrastan con fuentes externas
+FAST_MODEL = os.getenv("ESCRUTADOR_FAST_MODEL", "google/gemini-2.5-flash-lite")
 
 DEFAULT_SETTINGS = {
     "api_key": "",

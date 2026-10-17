@@ -1,8 +1,8 @@
-# Escrutador de Artículos · versión 2.0.0
+# Escrutador de Artículos · versión 2.1.0
 
 Analiza un artículo periodístico (URL, PDF o texto pegado) y entrega un informe de calidad con nota de 0 a 10: datos en los que se apoya el autor, contraste de esos datos con fuentes externas, ideas principales y secundarias calificadas, falacias, omisiones y una valoración final razonada.
 
-*By Luis Benedicto Tuzón with Claude Opus 5.5 · versión 2.0.0 · 2026*
+*By Luis Benedicto Tuzón with Claude Opus 5.5 · versión 2.1.0 · 2026*
 
 ## Versión web
 
@@ -29,8 +29,17 @@ En Ajustes también se elige el modelo por defecto (o cualquier ID del catálogo
 ## Entrada del artículo
 
 - **Enlace web**: descarga imitando la huella TLS de un navegador real (`curl_cffi`; si el antibot bloquea una huella, prueba Chrome, Safari, Chrome Android y Safari iOS por orden), lo que evita los 403/401 que muchos medios devuelven a clientes automáticos aunque la página se lea sin JavaScript (FT, WSJ, Washington Post, Investing…). Si la web sigue bloqueando o solo entrega el gancho de un muro de pago, se intenta la última copia de **archive.org**.
-- **Archivo PDF**.
+- **Archivo PDF**. Si es un PDF escaneado (sin texto seleccionable), se reconoce el texto con **OCR en el navegador** (pdf.js + tesseract.js, en español, hasta 15 páginas): el PDF no sale del equipo del usuario.
 - **Pegar texto**: para artículos de pago o webs que bloquean todo; se copia el texto desde el navegador.
+- **Varios artículos (lote)**: enlaces (uno por línea) y/o varios PDF, hasta 30. Se analizan de dos en dos, se guardan en el historial y al terminar se muestra una tabla con las notas, un **informe conjunto** imprimible en PDF y su versión en Markdown. Antes de empezar se indica el coste estimado.
+
+**Modo rápido**: cribado con Gemini 2.5 Flash Lite y sin búsqueda web (~0,005 $ y ~20 s por artículo). Los hechos se comprueban solo con el conocimiento del modelo, que no puede dar confianza alta a datos recientes; el informe lo advierte. Útil para lotes; para verificar de verdad, el análisis completo.
+
+**Comparar**: en el Historial se marcan dos análisis y se muestran lado a lado (notas, criterios de calidad, hechos verificados, fortalezas, debilidades y acciones editoriales).
+
+**Acciones editoriales**: tres cambios concretos que pediría un editor para mejorar el texto, adaptados al género.
+
+Estas funciones proceden del antiguo *Radar de Calidad Periodística*, integrado en esta app en la versión 2.1.0 con la metodología del Escrutador (verificación de hechos y rúbricas por género).
 
 El informe empieza con el **texto original** completo tal como se ha extraído (desplegable en pantalla, íntegro al imprimir y en el Markdown), para poder contrastar el análisis con la fuente.
 

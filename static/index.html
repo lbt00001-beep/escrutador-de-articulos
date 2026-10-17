@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,600;6..72,700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/styles.css?v=2.0.0">
+<link rel="stylesheet" href="/static/styles.css?v=2.1.0">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230b2557'/><path d='M9 10h14M9 16h10M9 22h7' stroke='white' stroke-width='2.4' stroke-linecap='round'/><circle cx='23' cy='21' r='3.5' fill='none' stroke='%23f2b33d' stroke-width='2.2'/></svg>">
 </head>
 <body>
@@ -34,6 +34,7 @@
       <button class="tab active" data-tab="url" role="tab" type="button">Enlace web</button>
       <button class="tab" data-tab="pdf" role="tab" type="button">Archivo PDF</button>
       <button class="tab" data-tab="text" role="tab" type="button">Pegar texto</button>
+      <button class="tab" data-tab="batch" role="tab" type="button">Varios artículos</button>
     </div>
 
     <form id="form">
@@ -54,6 +55,15 @@
           <input type="url" id="pastedUrl" placeholder="URL de origen (opcional)">
         </div>
       </div>
+      <div class="pane hidden" data-pane="batch">
+        <textarea id="batchUrls" rows="6" placeholder="Pega varios enlaces, uno por línea."></textarea>
+        <label class="drop drop-small" id="batchDrop">
+          <input type="file" id="batchFiles" accept="application/pdf" multiple hidden>
+          <span class="drop-icon" aria-hidden="true">PDF</span>
+          <span id="batchDropText">Y/o añade varios PDF <u>elige archivos</u></span>
+        </label>
+        <p class="small muted" style="margin:8px 0 0">Se analizan de dos en dos y cada uno queda en el historial. Al terminar verás una tabla comparativa y podrás descargar un informe conjunto. Para muchos artículos conviene el modo rápido.</p>
+      </div>
 
       <div class="options">
         <label class="field">
@@ -68,6 +78,11 @@
           <input type="checkbox" id="web" checked>
           <span class="slider" aria-hidden="true"></span>
           <span>Contrastar con búsqueda web <small>(recomendado, +≈0,02 $)</small></span>
+        </label>
+        <label class="switch" title="Cribado barato: Gemini 2.5 Flash Lite sin búsqueda web (~0,005 $, ~20 s). Los datos no se contrastan con fuentes externas.">
+          <input type="checkbox" id="fast">
+          <span class="slider" aria-hidden="true"></span>
+          <span>Modo rápido <small>(~0,005 $, sin contrastar con la web)</small></span>
         </label>
         <button class="btn primary" id="go" type="submit">Analizar artículo</button>
       </div>
@@ -86,6 +101,9 @@
     <p class="muted small" id="progressNote">El contraste con búsqueda web suele tardar entre 30 y 90 segundos.</p>
   </section>
 
+  <!-- Progreso del lote -->
+  <section class="card hidden" id="batchProgress"></section>
+
   <div class="error card hidden" id="error"></div>
 
   <!-- Resultados -->
@@ -97,6 +115,10 @@
   <div class="drawer-head">
     <h2>Análisis anteriores</h2>
     <button class="btn ghost" id="closeDrawer" type="button" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="compare-bar">
+    <span class="small muted" id="compareHint">Marca dos análisis para compararlos.</span>
+    <button class="btn primary" id="compareBtn" type="button" disabled>Comparar</button>
   </div>
   <ul id="historyList" class="history"></ul>
 </aside>
@@ -165,8 +187,8 @@
 
 <footer class="wrap foot muted small">
   <p>Análisis automatizado orientativo. La IA puede equivocarse: revisa las fuentes enlazadas antes de sacar conclusiones.</p>
-  <p class="credit" id="credit">By Luis Benedicto Tuzón with Claude Opus 5.5 · versión 2.0.0 · 2026</p>
+  <p class="credit" id="credit">By Luis Benedicto Tuzón with Claude Opus 5.5 · versión 2.1.0 · 2026</p>
 </footer>
-<script src="/static/app.js?v=2.0.0"></script>
+<script src="/static/app.js?v=2.1.0"></script>
 </body>
 </html>

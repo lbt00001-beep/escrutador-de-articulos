@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import analyze, extract, metrics
-from .config import (APP_CREDIT, APP_VERSION, APP_YEAR, BASE_DIR, HISTORY_DIR, IS_PUBLIC, MAX_PDF_MB, MODELS,
+from .config import (APP_CREDIT, APP_VERSION, APP_YEAR, BASE_DIR, FAST_MODEL, HISTORY_DIR, IS_PUBLIC, MAX_PDF_MB, MODELS,
                      OPENROUTER_KEY_URL, OPENROUTER_MODELS_URL, get_api_key, get_api_key_with_source,
                      load_settings, mask_key, save_settings)
 
@@ -48,6 +48,7 @@ def config():
     key, source = get_api_key_with_source()
     return {
         "public": IS_PUBLIC,
+        "fast_model": FAST_MODEL,
         "max_pdf_mb": MAX_PDF_MB,
         "models": MODELS,
         "default_model": settings["default_model"],
@@ -170,6 +171,7 @@ class AnalyzeRequest(BaseModel):
     web_search: bool | None = None
     web_results: int | None = None
     genero: str | None = None  # None = lo detecta la IA
+    rapido: bool = False       # modo rápido: modelo barato y sin búsqueda web
 
 
 @app.get("/api/genres")
@@ -215,7 +217,7 @@ async def analyze_article(req: AnalyzeRequest, x_openrouter_key: str | None = He
     web_results = max(1, min(15, req.web_results or settings["web_results"]))
     try:
         result = await run_in_threadpool(analyze.run, req.article, req.metrics, model, web, key, web_results,
-                                         req.genero)
+                                         req.genero, req.rapido)
     except analyze.AnalysisError as e:
         raise HTTPException(502, str(e))
     record = {

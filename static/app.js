@@ -209,46 +209,92 @@ function setFile(f) {
 }
 
 /* ---------- Flujo de análisis ---------- */
+const isFast = () => $("#fast").checked;
+$("#fast").addEventListener("change", () => {
+  // En modo rápido el modelo y la búsqueda web los fija la app
+  $("#model").disabled = isFast();
+  $("#web").disabled = isFast();
+  $("#web").closest(".switch").classList.toggle("off", isFast());
+});
+
+const NO_TEXT_PDF = /no contiene texto seleccionable/i;
+
+// Extrae un artículo; si es un PDF escaneado, aplica OCR en el navegador y lo envía como texto
+async function extractSource(src, onStatus = () => {}) {
+  const fd = new FormData();
+  if (src.url) fd.append("url", src.url);
+  if (src.text) {
+    fd.append("text", src.text);
+    fd.append("title", src.title || "");
+  }
+  if (src.file) fd.append("file", src.file);
+  try {
+    return await api("/api/extract", { method: "POST", body: fd });
+  } catch (err) {
+    if (!src.file || !NO_TEXT_PDF.test(err.message)) throw err;
+    onStatus("PDF escaneado: reconociendo el texto con OCR…");
+    const text = await ocrPdf(src.file, onStatus);
+    const title = src.file.name.replace(/\.pdf$/i, "");
+    const ext = await extractSource({ text, title }, onStatus);
+    ext.article.source = `${src.file.name} (OCR)`;
+    return ext;
+  }
+}
+
+async function analyzeExtracted(ext) {
+  return api("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...keyHeaders() },
+    body: JSON.stringify({
+      article: ext.article, metrics: ext.metrics, model: $("#model").value,
+      web_search: $("#web").checked, web_results: cfg.web_results,
+      genero: $("#genre").value || null, rapido: isFast(),
+    }),
+  });
+}
+
+function needsKey() {
+  if (cfg && !cfg.has_key) { openSettings(); showError("Añade tu clave de OpenRouter en Ajustes para poder analizar."); return true; }
+  return false;
+}
+
 $("#form").addEventListener("submit", async (e) => {
   e.preventDefault();
   hideError();
-  const fd = new FormData();
+  if (mode === "batch") return runBatch();
+  let src;
   if (mode === "url") {
     const url = $("#url").value.trim();
     if (!url) return showError("Pega la dirección del artículo.");
-    fd.append("url", url);
+    src = { url };
   } else if (mode === "text") {
     const text = $("#pasted").value.trim();
     if (text.length < 300) return showError("Pega el texto completo del artículo (mínimo unos 300 caracteres).");
-    fd.append("text", text);
-    fd.append("title", $("#pastedTitle").value.trim());
-    fd.append("url", $("#pastedUrl").value.trim());
+    src = { text, title: $("#pastedTitle").value.trim(), url: $("#pastedUrl").value.trim() };
   } else {
     if (!pdfFile) return showError("Elige un archivo PDF.");
     if (cfg && pdfFile.size > cfg.max_pdf_mb * 1048576) {
       return showError(`El PDF pesa ${fmt(pdfFile.size / 1048576)} MB y el máximo es ${cfg.max_pdf_mb} MB. Usa «Pegar texto» con el contenido del artículo.`);
     }
-    fd.append("file", pdfFile);
+    src = { file: pdfFile };
   }
-  if (cfg && !cfg.has_key) { openSettings(); return showError("Añade tu clave de OpenRouter en Ajustes para poder analizar."); }
+  if (needsKey()) return;
 
   setBusy(true);
   $("#results").classList.add("hidden");
+  $("#progressNote").textContent = isFast()
+    ? "Modo rápido: suele tardar unos 20 segundos."
+    : "El contraste con búsqueda web suele tardar entre 30 y 90 segundos.";
   step("extract");
   let timerId;
   try {
-    const ext = await api("/api/extract", { method: "POST", body: fd });
+    const ext = await extractSource(src, (msg) => { $("#progressNote").textContent = msg; });
     step("metrics");
     await new Promise((r) => setTimeout(r, 250));
     step("ai");
     const t0 = Date.now();
     timerId = setInterval(() => { $("#timer").textContent = `· ${Math.round((Date.now() - t0) / 1000)} s`; }, 1000);
-    const rec = await api("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...keyHeaders() },
-      body: JSON.stringify({ article: ext.article, metrics: ext.metrics, model: $("#model").value,
-        web_search: $("#web").checked, web_results: cfg.web_results, genero: $("#genre").value || null }),
-    });
+    const rec = await analyzeExtracted(ext);
     if (isPublic()) saveLocalRecord(rec);
     step("score");
     await new Promise((r) => setTimeout(r, 300));
@@ -262,6 +308,276 @@ $("#form").addEventListener("submit", async (e) => {
     setBusy(false);
   }
 });
+
+/* ---------- OCR de PDFs escaneados (en el navegador; el PDF no sale del equipo) ---------- */
+const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168";
+const TESSERACT = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+const OCR_MAX_PAGES = 15;
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if ([...document.scripts].some((s) => s.src === src)) return resolve();
+    const s = document.createElement("script");
+    s.src = src; s.onload = resolve; s.onerror = () => reject(new Error("No se pudo cargar el motor de OCR."));
+    document.head.appendChild(s);
+  });
+}
+
+async function ocrPdf(file, onStatus = () => {}) {
+  const pdfjs = await import(`${PDFJS}/pdf.min.mjs`);
+  pdfjs.GlobalWorkerOptions.workerSrc = `${PDFJS}/pdf.worker.min.mjs`;
+  await loadScript(TESSERACT);
+  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const pages = Math.min(pdf.numPages, OCR_MAX_PAGES);
+  const worker = await window.Tesseract.createWorker("spa");
+  const parts = [];
+  try {
+    for (let i = 1; i <= pages; i++) {
+      onStatus(`OCR: leyendo la página ${i} de ${pages}…`);
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      // intent "print" evita requestAnimationFrame, que el navegador congela si la pestaña no está visible
+      // (p. ej. durante un lote largo mientras el usuario está en otra pestaña)
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport, intent: "print" }).promise;
+      const { data } = await worker.recognize(canvas);
+      parts.push(data.text.trim());
+    }
+  } finally {
+    await worker.terminate();
+  }
+  const text = parts.join("\n\n").replace(/-\n(\w)/g, "$1").trim();
+  if (text.length < 300) throw new Error("El OCR no ha podido leer texto suficiente en el PDF.");
+  return text;
+}
+
+/* ---------- Lotes ---------- */
+let batchFiles = [];
+let batch = null; // { items: [{label, src, estado, rec, error}], start }
+
+$("#batchFiles").addEventListener("change", (e) => setBatchFiles([...e.target.files]));
+const batchDrop = $("#batchDrop");
+["dragenter", "dragover"].forEach((ev) => batchDrop.addEventListener(ev, (e) => { e.preventDefault(); batchDrop.classList.add("over"); }));
+["dragleave", "drop"].forEach((ev) => batchDrop.addEventListener(ev, (e) => { e.preventDefault(); batchDrop.classList.remove("over"); }));
+batchDrop.addEventListener("drop", (e) => setBatchFiles([...e.dataTransfer.files]));
+function setBatchFiles(files) {
+  batchFiles = files.filter((f) => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name));
+  $("#batchDropText").innerHTML = batchFiles.length
+    ? `<b>${batchFiles.length} PDF</b> seleccionados — <u>cambiar</u>`
+    : "Y/o añade varios PDF <u>elige archivos</u>";
+}
+
+async function runBatch() {
+  const urls = $("#batchUrls").value.split(/\s+/).map((u) => u.trim()).filter((u) => /^https?:\/\//i.test(u));
+  const tooBig = batchFiles.filter((f) => cfg && f.size > cfg.max_pdf_mb * 1048576);
+  if (tooBig.length) return showError(`Estos PDF superan ${cfg.max_pdf_mb} MB: ${tooBig.map((f) => f.name).join(", ")}.`);
+  const items = [
+    ...[...new Set(urls)].map((url) => ({ label: hostOf(url), src: { url } })),
+    ...batchFiles.map((file) => ({ label: file.name, src: { file } })),
+  ].map((it) => ({ ...it, estado: "pendiente" }));
+  if (items.length < 2) return showError("Añade al menos dos enlaces o PDF para analizar un lote.");
+  if (items.length > 30) return showError("El máximo por lote es de 30 artículos.");
+  if (needsKey()) return;
+
+  const coste = items.length * (isFast() ? 0.005 : $("#web").checked ? 0.04 : 0.01);
+  if (!confirm(`Se van a analizar ${items.length} artículos. Coste aproximado con tu clave: ${fmt(coste, 2)} $. ¿Continuar?`)) return;
+
+  batch = { items, start: new Date() };
+  $("#go").disabled = true;
+  $("#results").classList.add("hidden");
+  renderBatch();
+  let next = 0;
+  const workerFn = async () => {
+    while (next < items.length) {
+      const it = items[next++];
+      it.estado = "analizando";
+      renderBatch();
+      try {
+        const ext = await extractSource(it.src, (msg) => { it.nota = msg; renderBatch(); });
+        it.rec = await analyzeExtracted(ext);
+        if (isPublic()) saveLocalRecord(it.rec);
+        it.estado = "ok";
+      } catch (err) {
+        it.estado = "error";
+        it.error = err.message;
+      }
+      it.nota = "";
+      renderBatch();
+    }
+  };
+  await Promise.all([workerFn(), workerFn()]);
+  batch.end = new Date();
+  $("#go").disabled = false;
+  renderBatch();
+}
+
+function scoreCell(n) {
+  return n == null ? "—" : `<b style="color:${scoreColor(n)}">${fmt(n)}</b>`;
+}
+
+function renderBatch() {
+  const box = $("#batchProgress");
+  if (!batch) { box.classList.add("hidden"); return; }
+  const done = batch.items.filter((i) => i.estado === "ok" || i.estado === "error").length;
+  const ok = batch.items.filter((i) => i.rec);
+  const coste = ok.reduce((s, i) => s + ((i.rec.result._meta || {}).coste_usd || 0), 0);
+  const finished = Boolean(batch.end);
+  box.classList.remove("hidden");
+  box.innerHTML = `
+    <div class="batch-head">
+      <h3>${finished ? "Lote terminado" : "Analizando el lote…"} <span class="muted">${done} de ${batch.items.length}</span></h3>
+      <div class="batch-actions">
+        ${finished && ok.length ? `<button class="btn ghost" type="button" data-batch="report">Ver informe conjunto</button>
+          <button class="btn ghost" type="button" data-batch="md">Descargar Markdown</button>` : ""}
+        ${finished ? `<button class="btn ghost" type="button" data-batch="close">Cerrar</button>` : ""}
+      </div>
+    </div>
+    <div class="bar"><span style="width:${(done / batch.items.length) * 100}%;background:var(--navy)"></span></div>
+    <table class="data batch-table">
+      <thead><tr><th>Artículo</th><th>Género</th><th>Global</th><th>Fiabilidad</th><th>Calidad</th><th></th></tr></thead>
+      <tbody>${batch.items.map((it, i) => {
+        if (!it.rec) {
+          const estado = it.estado === "error" ? `<span class="src-none">Error: ${esc(it.error)}</span>`
+            : it.estado === "analizando" ? `<span class="muted">${esc(it.nota || "Analizando…")}</span>` : `<span class="muted">Pendiente</span>`;
+          return `<tr><td>${esc(it.label)}</td><td colspan="5">${estado}</td></tr>`;
+        }
+        const p = it.rec.result.puntuacion || {};
+        const a = it.rec.article;
+        return `<tr><td><b>${esc(a.title || it.rec.result.titulo_inferido || it.label)}</b><br><span class="muted small">${esc([a.author, outletName(a.source || "")].filter(Boolean).join(" · "))}</span></td>
+          <td>${esc(p.genero || it.rec.result.tipo_texto || "")}</td><td>${scoreCell(p.nota)}</td>
+          <td>${scoreCell(p.fiabilidad ? p.fiabilidad.nota : null)}</td><td>${scoreCell(p.calidad ? p.calidad.nota : null)}</td>
+          <td><button class="linklike" type="button" data-open="${i}">Ver</button></td></tr>`;
+      }).join("")}</tbody>
+    </table>
+    ${finished ? `<p class="small muted">Coste total: ${fmt(coste, 3)} $. Todos los análisis están en el historial.</p>` : ""}`;
+  box.querySelectorAll("[data-open]").forEach((b) => { b.onclick = () => { render(batch.items[b.dataset.open].rec); window.scrollTo({ top: box.offsetTop + box.offsetHeight }); }; });
+  const act = (k) => box.querySelector(`[data-batch="${k}"]`);
+  if (act("report")) act("report").onclick = renderBatchReport;
+  if (act("md")) act("md").onclick = downloadBatchMarkdown;
+  if (act("close")) act("close").onclick = () => { batch = null; renderBatch(); resetView(); };
+}
+
+// Informe conjunto: tabla y ficha breve de cada artículo, lista para imprimir o guardar en PDF
+function renderBatchReport() {
+  const ok = batch.items.filter((i) => i.rec);
+  const el = $("#results");
+  el.innerHTML = `<article class="card batch-report">
+      <h2>Informe conjunto · ${ok.length} artículos</h2>
+      <p class="muted">${esc(batch.start.toLocaleString("es-ES"))} · ${isFast() ? "modo rápido" : "análisis completo"}</p>
+      <div class="secnav static"><span class="spacer"></span><button class="btn ghost" type="button" data-act="print">PDF</button></div>
+      ${$("#batchProgress table").outerHTML}
+    </article>
+    ${ok.map((it) => {
+      const r = it.rec.result, a = it.rec.article, p = r.puntuacion || {};
+      return `<section class="card section batch-card">
+        <h3>${esc(a.title || r.titulo_inferido)} <span class="score-pill" style="background:${scoreColor(p.nota)}">${fmt(p.nota)}</span></h3>
+        <p class="sub">${esc([a.author, outletName(a.source || ""), a.date, p.genero].filter(Boolean).join(" · "))}${p.fiabilidad ? ` · Fiabilidad ${fmt(p.fiabilidad.nota)} · Calidad ${fmt(p.calidad.nota)}` : ""}</p>
+        <p>${esc(r.resumen)}</p>
+        ${(r.acciones_editoriales || []).length ? `<h4 class="mini">Acciones editoriales</h4><ol class="plain">${r.acciones_editoriales.map((x) => `<li>${esc(x.accion)}</li>`).join("")}</ol>` : ""}
+        <div class="grid2"><div><h4 class="mini">Fortalezas</h4><ul class="plain">${(r.fortalezas || []).slice(0, 3).map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
+        <div><h4 class="mini">Debilidades</h4><ul class="plain">${(r.debilidades || []).slice(0, 3).map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div></div>
+      </section>`;
+    }).join("")}`;
+  el.querySelectorAll(".batch-report [data-open]").forEach((b) => b.remove());
+  el.querySelector('[data-act="print"]').onclick = () => {
+    document.title = `Informe conjunto - ${ok.length} articulos - ${batch.start.toISOString().slice(0, 10)}`;
+    window.print();
+  };
+  el.classList.remove("hidden");
+  $("#intake").classList.add("hidden");
+  current = null;
+}
+
+function downloadBatchMarkdown() {
+  const ok = batch.items.filter((i) => i.rec);
+  const L = [`# Informe conjunto · ${ok.length} artículos`, "", `${batch.start.toLocaleString("es-ES")}`, "",
+    "| Artículo | Medio | Género | Global | Fiabilidad | Calidad |", "|---|---|---|---|---|---|"];
+  ok.forEach((it) => {
+    const p = it.rec.result.puntuacion || {}, a = it.rec.article;
+    L.push(`| ${a.title || it.rec.result.titulo_inferido} | ${outletName(a.source || "")} | ${p.genero || ""} | ${p.nota} | ${p.fiabilidad ? p.fiabilidad.nota ?? "—" : "—"} | ${p.calidad ? p.calidad.nota : "—"} |`);
+  });
+  batch.items.filter((i) => i.estado === "error").forEach((it) => L.push(`| ${it.label} | — | ERROR: ${it.error} | | | |`));
+  ok.forEach((it) => {
+    const r = it.rec.result, a = it.rec.article, p = r.puntuacion || {};
+    L.push("", `## ${a.title || r.titulo_inferido} — ${p.nota}/10`, "", [a.author, outletName(a.source || ""), a.date, a.url].filter(Boolean).join(" · "), "", r.resumen, "");
+    if ((r.acciones_editoriales || []).length) {
+      L.push("**Acciones editoriales:**", "");
+      r.acciones_editoriales.forEach((x, n) => L.push(`${n + 1}. ${x.accion}${x.motivo ? ` — ${x.motivo}` : ""}`));
+      L.push("");
+    }
+  });
+  L.push("---", "", `*${$("#credit").textContent}*`, "");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([L.join("\n")], { type: "text/markdown;charset=utf-8" }));
+  link.download = `Informe conjunto - ${ok.length} articulos - ${batch.start.toISOString().slice(0, 10)}.md`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+/* ---------- Comparar dos análisis ---------- */
+const compareSel = new Set();
+function updateCompareBar() {
+  $("#compareBtn").disabled = compareSel.size !== 2;
+  $("#compareHint").textContent = compareSel.size === 2 ? "Listo para comparar." : `Marca dos análisis para compararlos (${compareSel.size}/2).`;
+}
+$("#compareBtn").onclick = async () => {
+  const [a, b] = await Promise.all([...compareSel].map(getRecord));
+  toggleDrawer(false);
+  if (a && b) renderCompare(a, b);
+};
+
+async function getRecord(id) {
+  return isPublic() ? LS.get("history", []).find((r) => r.id === id) : api(`/api/history/${id}`);
+}
+
+function renderCompare(a, b) {
+  const recs = [a, b];
+  const ps = recs.map((r) => r.result.puntuacion || {});
+  // Criterios de calidad de ambos análisis (pueden ser de géneros distintos)
+  const keys = [];
+  ps.forEach((p) => (p.desglose || []).forEach((c) => { if (!keys.some((k) => k.clave === c.clave)) keys.push(c); }));
+  const val = (p, key) => { const c = (p.desglose || []).find((x) => x.clave === key); return c ? c.puntuacion : null; };
+  const head = (r, p) => `<div class="cmp-col">
+      <div class="kicker"><span class="chip navy">${esc(p.genero || r.result.tipo_texto || "")}</span></div>
+      <h3>${esc(r.article.title || r.result.titulo_inferido)}</h3>
+      <p class="byline">${esc([r.article.author, outletName(r.article.source || ""), r.article.date].filter(Boolean).join(" · "))}</p>
+      <div class="cmp-scores">
+        <div><span class="k">Global</span>${scoreCell(p.nota)}</div>
+        <div><span class="k">Fiabilidad</span>${scoreCell(p.fiabilidad ? p.fiabilidad.nota : null)}</div>
+        <div><span class="k">Calidad</span>${scoreCell(p.calidad ? p.calidad.nota : null)}</div>
+      </div>
+      <p class="small">${esc(r.result.resumen)}</p>
+    </div>`;
+  const facts = (r) => {
+    const counts = {};
+    (r.result.verificacion || []).forEach((v) => { counts[v.veredicto] = (counts[v.veredicto] || 0) + 1; });
+    return Object.entries(counts).map(([k, n]) => `${verdict(k)} <span class="muted">${n}</span>`).join(" ") || "<span class='muted'>—</span>";
+  };
+  const list = (arr) => `<ul class="plain">${(arr || []).slice(0, 4).map((x) => `<li>${esc(typeof x === "string" ? x : x.accion)}</li>`).join("") || "<li>—</li>"}</ul>`;
+  const el = $("#results");
+  el.innerHTML = `<article class="card compare">
+      <div class="batch-head"><h2>Comparación</h2>
+        <div class="batch-actions"><button class="btn ghost" type="button" data-act="print">PDF</button><button class="btn ghost" type="button" data-act="new">Nuevo análisis</button></div></div>
+      ${ps.some((p) => p.version !== 2) ? `<p class="warn">Uno de los análisis usa los criterios antiguos (v1): sus notas no son comparables con las de la v2. Vuelve a analizarlo para compararlos con justicia.</p>` : ""}
+      ${ps[0].genero && ps[1].genero && ps[0].genero !== ps[1].genero ? `<p class="small muted">Son géneros distintos: la calidad se mide con rúbricas diferentes. La fiabilidad sí es directamente comparable.</p>` : ""}
+      <div class="cmp-grid">${head(a, ps[0])}${head(b, ps[1])}</div>
+      <h4 class="mini">Criterios de calidad</h4>
+      <table class="data cmp-table"><thead><tr><th>Criterio</th><th>A</th><th>B</th></tr></thead><tbody>
+        ${keys.map((k) => `<tr><td>${esc(k.nombre)}</td><td>${scoreCell(val(ps[0], k.clave))}</td><td>${scoreCell(val(ps[1], k.clave))}</td></tr>`).join("")}
+      </tbody></table>
+      <div class="cmp-grid">
+        <div class="cmp-col"><h4 class="mini">Hechos verificados</h4>${facts(a)}<h4 class="mini">Fortalezas</h4>${list(a.result.fortalezas)}<h4 class="mini">Debilidades</h4>${list(a.result.debilidades)}<h4 class="mini">Acciones editoriales</h4>${list(a.result.acciones_editoriales)}</div>
+        <div class="cmp-col"><h4 class="mini">Hechos verificados</h4>${facts(b)}<h4 class="mini">Fortalezas</h4>${list(b.result.fortalezas)}<h4 class="mini">Debilidades</h4>${list(b.result.debilidades)}<h4 class="mini">Acciones editoriales</h4>${list(b.result.acciones_editoriales)}</div>
+      </div>
+    </article>`;
+  el.classList.remove("hidden");
+  $("#intake").classList.add("hidden");
+  current = null;
+  el.querySelector('[data-act="print"]').onclick = () => window.print();
+  el.querySelector('[data-act="new"]').onclick = resetView;
+  window.scrollTo({ top: 0 });
+}
 
 async function api(url, opts) {
   const r = await fetch(url, opts);
@@ -331,6 +647,7 @@ function render(rec) {
         <div class="byline">${byline}</div>
         ${m.posible_texto_parcial ? `<p class="warn" style="margin:0 0 14px">Solo se han podido leer ${fmt(m.palabras, 0)} palabras. Si el artículo es de pago o está incompleto, cópialo desde el navegador en «Pegar texto» o súbelo en PDF para un análisis completo.</p>` : ""}
         ${safeUrl(a.archived_from) ? `<p class="source-note">La web original bloqueó la descarga; se ha leído la <a href="${esc(a.archived_from)}" target="_blank" rel="noopener">copia guardada en archive.org</a>.</p>` : ""}
+        ${(r._meta || {}).modo === "rapido" ? `<p class="warn" style="margin:0 0 14px"><b>Modo rápido:</b> los datos se han comprobado solo con el conocimiento del modelo, sin buscar en la web. Para una verificación completa, vuelve a analizarlo sin modo rápido.</p>` : ""}
         <p class="summary">${esc(r.resumen)}</p>
         <div class="thesis"><b>Tesis del autor:</b> ${esc(r.tesis)}</div>
       </div>
@@ -584,6 +901,8 @@ function sectionValoracion(r, p) {
       <div class="box"><h4>Debilidades</h4><ul class="plain">${(r.debilidades || []).map((x) => `<li>${esc(x)}</li>`).join("") || "<li>—</li>"}</ul></div>
     </div>
     <div class="verdict-box"><h4>Valoración global</h4><p>${esc(r.valoracion_global)}</p></div>
+    ${(r.acciones_editoriales || []).length ? `<div class="actions-box"><h4>Acciones editoriales <span class="muted small">lo que un editor pediría para mejorar este texto</span></h4>
+      <ol>${r.acciones_editoriales.map((x) => `<li><b>${esc(x.accion)}</b>${x.motivo ? `<span class="muted"> — ${esc(x.motivo)}</span>` : ""}</li>`).join("")}</ol></div>` : ""}
     <div class="meta-line">Modelo: ${esc(meta.modelo)} · Búsqueda web: ${meta.busqueda_web ? "sí" : "no"} · Criterios v${meta.criterios_version || 1}
       ${meta.coste_usd != null ? ` · Coste: ${fmt(meta.coste_usd, 4)} $` : ""}
       ${meta.tokens_entrada ? ` · Tokens: ${fmt(meta.tokens_entrada, 0)} / ${fmt(meta.tokens_salida, 0)}` : ""}
@@ -675,6 +994,12 @@ function downloadMarkdown() {
   (p.desglose || []).forEach((c) => L.push(`| ${c.nombre} | ${Math.round(c.peso * 100)} % | ${c.puntuacion} |`));
   if (p.limite) L.push("", `*${p.limite}*`);
   L.push("", `**Nota final: ${p.nota}/10**`, "", r.valoracion_global, "");
+  if ((r.acciones_editoriales || []).length) {
+    L.push("## 6. Acciones editoriales", "");
+    r.acciones_editoriales.forEach((x, n) => L.push(`${n + 1}. ${x.accion}${x.motivo ? ` — ${x.motivo}` : ""}`));
+    L.push("");
+  }
+  if ((r._meta || {}).modo === "rapido") L.push("*Modo rápido: los datos se comprobaron solo con el conocimiento del modelo, sin búsqueda web.*", "");
   L.push("---", "", `*Informe generado con Escrutador de Artículos (modelo ${(r._meta || {}).modelo || ""}). ${$("#credit").textContent}*`, "");
   const blob = new Blob([L.join("\n")], { type: "text/markdown;charset=utf-8" });
   const link = document.createElement("a");
@@ -720,12 +1045,22 @@ async function loadHistory() {
     ? LS.get("history", []).map(historySummary)
     : await fetch("/api/history").then((r) => r.json()).catch(() => []);
   if (!items.length) { list.innerHTML = `<li class="muted">Todavía no hay análisis.</li>`; return; }
+  [...compareSel].forEach((id) => { if (!items.some((h) => h.id === id)) compareSel.delete(id); });
   list.innerHTML = items.map((h) => `<li data-id="${esc(h.id)}">
+    <input type="checkbox" class="cmp-check" data-cmp="${esc(h.id)}" title="Marcar para comparar" ${compareSel.has(h.id) ? "checked" : ""}>
     <span class="hn" style="color:${scoreColor(h.nota)}">${fmt(h.nota)}</span>
     <span><div class="ht">${esc(h.titulo)}</div><div class="hs">${esc(h.fuente)} · ${esc(new Date(h.fecha).toLocaleDateString("es-ES"))}</div></span>
     <button class="del" title="Borrar" data-del="${esc(h.id)}">🗑</button></li>`).join("");
+  updateCompareBar();
+  $$("[data-cmp]", list).forEach((c) => c.addEventListener("change", () => {
+    if (c.checked) {
+      if (compareSel.size >= 2) { c.checked = false; return; }
+      compareSel.add(c.dataset.cmp);
+    } else compareSel.delete(c.dataset.cmp);
+    updateCompareBar();
+  }));
   $$("li[data-id]", list).forEach((li) => li.addEventListener("click", (e) => {
-    if (e.target.dataset.del) return;
+    if (e.target.dataset.del || e.target.dataset.cmp) return;
     loadHistoryItem(li.dataset.id);
     toggleDrawer(false);
   }));

@@ -9,7 +9,7 @@ from datetime import date
 
 import httpx
 
-from .config import OPENROUTER_URL, MAX_ARTICLE_CHARS, get_api_key
+from .config import FAST_MODEL, OPENROUTER_URL, MAX_ARTICLE_CHARS, get_api_key
 from .scoring import FACT_VERDICTS, GENRES, QUALITY_CRITERIA, RUBRICS, score
 
 CRITERIA_VERSION = 2
@@ -92,6 +92,10 @@ SCHEMA = _obj({
                                 "justificacion": _str("1-2 frases")}) for k in QUALITY_CRITERIA}),
     "fortalezas": _arr(_str()),
     "debilidades": _arr(_str()),
+    "acciones_editoriales": _arr(_obj({
+        "accion": _str("Cambio concreto que haría un editor (qué y dónde)"),
+        "motivo": _str("Por qué mejora el texto, en una frase"),
+    })),
     "valoracion_global": _str("Valoración final razonada en 3-4 frases, empezando por lo mejor del texto"),
 })
 
@@ -151,6 +155,13 @@ puntúalo por lo que el texto sí hace y dilo en la justificación; no lo hundas
 
 7. SÍNTESIS: "fortalezas" y "debilidades" con el mismo cuidado (empieza por las fortalezas); \
 "valoracion_global" empezando por lo mejor del texto.
+
+8. ACCIONES EDITORIALES ("acciones_editoriales", exactamente 3): lo que un editor pediría al autor para \
+mejorar ESTE texto, de mayor a menor impacto. Cada acción debe ser concreta y aplicable (qué cambiar y dónde), \
+no un consejo genérico, y respetar el género. En opinión, columna o editorial NO pidas citar fuentes formales, \
+dar voz al adversario, añadir "la otra versión" ni suavizar el tono o la ironía: pide lo que haría mejor ESE \
+argumento (corregir un dato erróneo, precisar una afirmación exagerada, reforzar el razonamiento más débil, \
+aclarar un contexto que el lector necesita).
 
 Si el texto parece incompleto (muro de pago, corte abrupto), evalúa solo lo que hay y dilo en el resumen.
 Sé imparcial: el mismo rigor sea cual sea la orientación ideológica del texto.
@@ -232,7 +243,9 @@ def _call(payload: dict, api_key: str) -> dict:
 
 
 def run(article: dict, metrics: dict, model: str, web_search: bool = True, api_key: str = "",
-        web_results: int = 8, genero: str | None = None) -> dict:
+        web_results: int = 8, genero: str | None = None, rapido: bool = False) -> dict:
+    if rapido:  # cribado: modelo barato y sin búsqueda web
+        model, web_search = FAST_MODEL, False
     api_key = api_key or get_api_key()
     if not api_key:
         raise AnalysisError("No hay clave de OpenRouter. Abre ⚙ Ajustes y pega tu clave "
@@ -241,6 +254,10 @@ def run(article: dict, metrics: dict, model: str, web_search: bool = True, api_k
     system = SYSTEM_PROMPT.format(criteria=criteria_txt)
     if genero in GENRES:
         system += f"\n\nEl usuario indica que el género del texto es «{genero}»: úsalo en \"genero\"."
+    if not web_search:
+        system += ("\n\nSIN BÚSQUEDA WEB: verifica solo con tu conocimiento. Usa \"confianza\" alta únicamente "
+                   "para hechos muy conocidos y estables; si el dato es reciente o local, usa media o baja, y deja "
+                   "\"fuentes\" vacías salvo URLs que conozcas con certeza.")
     payload = {
         "model": model,
         "messages": [
@@ -300,6 +317,7 @@ def run(article: dict, metrics: dict, model: str, web_search: bool = True, api_k
         "tokens_salida": usage.get("completion_tokens"),
         "coste_usd": usage.get("cost"),
         "criterios_version": CRITERIA_VERSION,
+        "modo": "rapido" if rapido else "completo",
     }
     _normalize(result)
     if genero in GENRES:
@@ -348,7 +366,7 @@ def _as_bool(v) -> bool:
 def _normalize(result: dict) -> None:
     """Garantiza tipos y claves para que la interfaz nunca reciba estructuras incompletas."""
     for k in ("afirmaciones", "datos_del_autor", "verificacion", "ideas_principales", "falacias_y_sesgos",
-              "omisiones", "fortalezas", "debilidades"):
+              "omisiones", "fortalezas", "debilidades", "acciones_editoriales"):
         if not isinstance(result.get(k), list):
             result[k] = []
     for k in ("titulo_inferido", "resumen", "tesis", "valoracion_global"):
@@ -377,6 +395,10 @@ def _normalize(result: dict) -> None:
             idea["secundarias"] = []
         for s in idea["secundarias"]:
             s["veredicto"] = _fix_idea_verdict(s.get("veredicto"))
+    # Acciones editoriales: objeto {accion, motivo}; se admite texto suelto y se limita a 3
+    result["acciones_editoriales"] = [
+        a if isinstance(a, dict) else {"accion": str(a), "motivo": ""}
+        for a in result["acciones_editoriales"] if a][:3]
     for f in result["falacias_y_sesgos"]:
         f["confianza"] = _closest(f.get("confianza"), ["alta", "media"], "media")
     # Las omisiones pueden llegar como texto suelto (v1) o como objeto (v2)
